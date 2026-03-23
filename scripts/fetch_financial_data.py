@@ -9,10 +9,10 @@
     python fetch_financial_data.py
 """
 
+import math
 import sys
 import time
 import requests
-import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
@@ -83,7 +83,16 @@ CASHFLOW_LABELS = {
 
 
 def fetch_report(report_name: str, columns: str, page_size: int = 5) -> list[dict]:
-    """从东方财富数据中心获取港股财务报表数据。"""
+    """从东方财富数据中心获取港股财务报表数据。
+
+    Args:
+        report_name: 报表名称，例如 'RPT_HKF10_FN_BALANCE'。
+        columns: 需要返回的字段，逗号分隔。
+        page_size: 每页返回的记录数，默认 5。
+
+    Returns:
+        包含报表行数据的列表；若请求失败则返回空列表。
+    """
     params = {
         "reportName": report_name,
         "columns": columns,
@@ -108,7 +117,7 @@ def fetch_report(report_name: str, columns: str, page_size: int = 5) -> list[dic
 
 def format_value(value) -> str:
     """将数值格式化为 '亿' 单位的字符串，保留两位小数。"""
-    if value is None or value == "" or (isinstance(value, float) and value != value):
+    if value is None or value == "" or (isinstance(value, float) and math.isnan(value)):
         return "—"
     try:
         num = float(value)
@@ -128,10 +137,20 @@ def extract_year(date_str: str) -> str:
         return date_str[:4]
 
 
-def build_sheet_data(rows: list[dict], labels: dict) -> tuple[list[str], dict]:
+def build_sheet_data(rows: list[dict], labels: dict) -> tuple[list[str], dict[str, dict[str, str]]]:
     """
-    构建表头（年份列表）和数据字典 {field: {year: formatted_value}}。
-    只保留最近 5 个年报（12-31）。
+    构建表头（年份列表）和数据字典。
+
+    Args:
+        rows: 从 API 返回的报表行列表，每行包含 REPORT_DATE 及各字段。
+        labels: 需要提取的字段映射 {field_name: 中文标签}。
+
+    Returns:
+        (years, data) 元组：
+          - years: 按时间升序排列的年份标签列表（如 ['2021年', '2022年']）。
+          - data: {field: {year: formatted_value}} 的嵌套字典，值已格式化为亿元字符串。
+
+    只保留最近 5 个年报（REPORT_DATE 以 '12-31' 结尾）。
     """
     annual_rows = [r for r in rows if r.get("REPORT_DATE", "").endswith("12-31")]
     # 取最近 N 年（最多 5 年），按时间升序排列用于表格列
@@ -148,8 +167,16 @@ def build_sheet_data(rows: list[dict], labels: dict) -> tuple[list[str], dict]:
     return years, data
 
 
-def build_derived_balance(rows: list[dict], years: list[str]) -> dict:
-    """计算资产负债表衍生指标（资产负债率、流动比率）。"""
+def build_derived_balance(rows: list[dict], years: list[str]) -> dict[str, dict[str, str]]:
+    """计算资产负债表衍生指标（资产负债率、流动比率）。
+
+    Args:
+        rows: 资产负债表原始行数据。
+        years: 需要计算的年份标签列表。
+
+    Returns:
+        {衍生指标名称: {year: formatted_value}} 的嵌套字典。
+    """
     derived: dict[str, dict[str, str]] = {
         "资产负债率": {},
         "流动比率": {},
@@ -182,8 +209,16 @@ def build_derived_balance(rows: list[dict], years: list[str]) -> dict:
     return derived
 
 
-def build_derived_income(rows: list[dict], years: list[str]) -> dict:
-    """计算利润表衍生指标（毛利率、净利率）。"""
+def build_derived_income(rows: list[dict], years: list[str]) -> dict[str, dict[str, str]]:
+    """计算利润表衍生指标（毛利率、净利率）。
+
+    Args:
+        rows: 利润表原始行数据。
+        years: 需要计算的年份标签列表。
+
+    Returns:
+        {衍生指标名称: {year: formatted_value}} 的嵌套字典。
+    """
     derived: dict[str, dict[str, str]] = {
         "毛利率": {},
         "净利率": {},
@@ -444,7 +479,7 @@ def main():
         ("现金流量表", cashflow_rows),
     ]:
         annual = [r for r in rows if r.get("REPORT_DATE", "").endswith("12-31")]
-        dates = sorted(r["REPORT_DATE"][:7] for r in annual)
+        dates = sorted(r.get("REPORT_DATE", "")[:7] for r in annual if r.get("REPORT_DATE"))
         print(f"  {label}：共 {len(annual)} 条年报数据，期间：{dates[0] if dates else '—'} ~ {dates[-1] if dates else '—'}")
 
 
